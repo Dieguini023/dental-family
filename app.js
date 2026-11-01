@@ -1,4 +1,4 @@
-import { createStore, DEMO } from './data.js';
+import { createStore, DEMO, datosExcel } from './data.js';
 import { SOCIOS } from './config.js';
 
 // ------------------------------------------------------------------ utilidades
@@ -369,6 +369,7 @@ function masView() {
       <button class="row" data-a="cfgSaldos"><span class="row-main"><b>Saldos iniciales</b><small>Dinero con que arrancó cada cuenta</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgFijos"><span class="row-main"><b>Pagos fijos</b><small>Valor de referencia y día de pago</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgListas"><span class="row-main"><b>Listas</b><small>Odontólogos, tipos de trabajo, cuentas</small></span><span class="go">›</span></button>
+      ${!cfg().reiniciado ? `<button class="row" data-a="reiniciar"><span class="row-main"><b class="out">Empezar de cero con los datos del Excel</b><small>Borra todas las pruebas y deja solo lo que había en el Excel. Se usa una sola vez.</small></span><span class="go">›</span></button>` : ''}
       <button class="row" data-a="importar"><span class="row-main"><b>Importar desde el Excel</b><small>Trae MOVIMIENTOS y TRABAJOS de Dental_Family_Control.xlsx</small></span><span class="go">›</span></button>
     </div>` : ''}
 
@@ -754,6 +755,22 @@ document.addEventListener('click', e => {
     retiro: () => openMov({ tipo: 'Egreso', categoria: 'Retiro de socio', descripcion: 'Retiro de utilidades' }),
     exportar, resumenMes,
     copia: descargarCopia,
+    reiniciar: async () => {
+      if (!confirm(`Se borrarán TODOS los registros actuales (${S.movs.length} movimientos y ${S.trabajos.length} trabajos) y quedarán solo los datos del Excel (10 movimientos y 6 trabajos de octubre).\n\nLos ajustes y el reparto entre socios se conservan.\n\n¿Continuar?`)) return;
+      const ok = prompt('Para confirmar, escriba BORRAR');
+      if ((ok || '').trim().toUpperCase() !== 'BORRAR') return toast('Cancelado. No se borró nada.');
+      try {
+        toast('Reiniciando…');
+        await store.batchDelete('movimientos', S.movs.map(m => m.id));
+        await store.batchDelete('trabajos', S.trabajos.map(t => t.id));
+        const d = datosExcel(), now = Date.now();
+        await store.batchSet('movimientos', d.movimientos.map((m, i) => ({ ...m, id: 'excel-m' + i, creadoPor: S.user.email, creadoMs: now + i })));
+        await store.batchSet('trabajos', d.trabajos.map((t, i) => ({ ...t, id: 'excel-t' + i, creadoPor: S.user.email, creadoMs: now + i })));
+        store.setConfig({ ...JSON.parse(JSON.stringify(cfg())), reiniciado: true });
+        try { localStorage.removeItem(BK); } catch (e) {}
+        toast('Listo: quedaron solo los datos del Excel');
+      } catch (e) { toast(traducirError(e), true); }
+    },
     restaurar: () => (sheetState = null, openSheet('Restaurar copia', `<p>Elija el archivo <b>DentalFamily_copia_AAAA-MM-DD.json</b> (está en la carpeta <b>Descargas</b> o donde lo haya guardado).</p>
       <p class="hint">Solo se agregan los registros que falten. Nada de lo que ya está se borra ni se duplica.</p>
       <input type="file" id="fileCopia" accept=".json,application/json" class="file">`)),

@@ -3,6 +3,9 @@ import { firebaseConfig } from './config.js';
 
 export const DEMO = !firebaseConfig.apiKey || firebaseConfig.apiKey.startsWith('PEGAR');
 
+// Datos iniciales tomados del libro Excel (fotos del 31/10/2026)
+export function datosExcel() { const s = seed(); return { movimientos: s.movimientos, trabajos: s.trabajos }; }
+
 export function createStore(h) {
   return DEMO ? demoStore(h) : fbStore(h);
 }
@@ -43,6 +46,13 @@ async function fbStore(h) {
     update: (c, id, o) => fire(F.updateDoc(F.doc(db, c, id), o)),
     remove: (c, id) => fire(F.deleteDoc(F.doc(db, c, id))),
     setConfig: o => fire(F.setDoc(F.doc(db, 'config', 'general'), o)),
+    batchDelete: async (c, ids) => {
+      for (let i = 0; i < ids.length; i += 400) {
+        const b = F.writeBatch(db);
+        ids.slice(i, i + 400).forEach(id => b.delete(F.doc(db, c, id)));
+        await b.commit();
+      }
+    },
     batchSet: async (c, arr) => {
       for (let i = 0; i < arr.length; i += 400) {
         const b = F.writeBatch(db);
@@ -81,6 +91,7 @@ function demoStore(h) {
     update: (c, i, o) => { const x = st[c].find(d => d.id === i); if (x) Object.assign(x, o); return done(); },
     remove: (c, i) => { st[c] = st[c].filter(d => d.id !== i); return done(); },
     setConfig: o => { st.config = o; return done(); },
+    batchDelete: (c, ids) => { st[c] = st[c].filter(x => !ids.includes(x.id)); return done(); },
     batchSet: (c, arr) => { arr.forEach(o => { st[c] = st[c].filter(x => x.id !== o.id); st[c].push({ ...o }); }); return done(); },
     batchAdd: (c, arr) => { arr.forEach(o => st[c].push({ id: id(), ...o })); return done(); },
     resetDemo: () => { st = seed(); return done(); }
