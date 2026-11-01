@@ -1,6 +1,6 @@
 // Service worker: permite abrir la app sin conexión.
-const CACHE = 'df-v1';
-const SHELL = ['./', './index.html', './styles.css', './app.js', './data.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png', './logo.png'];
+const CACHE = 'df-v2';
+const SHELL = ['./', './index.html', './styles.css', './app.js', './data.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
 self.addEventListener('activate', e => {

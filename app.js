@@ -18,6 +18,12 @@ const fDia = f => { if (!f) return ''; const [y, m, d] = f.split('-'); const s =
 const fCorta = f => f ? `${f.slice(8, 10)}/${f.slice(5, 7)}` : '';
 const daysInMonth = m => { const [y, mm] = m.split('-').map(Number); return new Date(y, mm, 0).getDate(); };
 
+
+// Marca vectorial (nítida en cualquier tamaño)
+const TOOTH = 'M7.5 3C5 3 3.5 5 3.5 7.5c0 2 .9 3.6 1.4 6C5.4 16 5.6 21 7.6 21c1.8 0 2.1-4 3.1-6 .4-.8 2.2-.8 2.6 0 1 2 1.3 6 3.1 6 2 0 2.2-5 2.7-7.5.5-2.4 1.4-4 1.4-6C20.5 5 19 3 16.5 3c-2 0-2.8 1-4.5 1S9.5 3 7.5 3z';
+const HEART = 'M12 21.35l-1.45-1.32C5.4 15.36 2 12.28 2 8.5 2 5.42 4.42 3 7.5 3c1.74 0 3.41.81 4.5 2.09C13.09 3.81 14.76 3 16.5 3 19.58 3 22 5.42 22 8.5c0 3.78-3.4 6.86-8.55 11.54L12 21.35z';
+const brandMark = (cls = '') => `<div class="brand ${cls}"><span class="brand-ic"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="${TOOTH}" fill="#fff"/><path transform="translate(9.36 7.6) scale(.22)" fill="#E0306A" d="${HEART}"/></svg></span><span class="brand-tx"><b>Dental Family</b><small>Center</small></span></div>`;
+
 // ------------------------------------------------------------------ configuración por defecto
 const DEFAULT_CFG = {
   // pct = PARTES de cada socio (la ganancia se reparte en proporción: Adiela 10,2 · Alirio 25 · Hernán 25 = 60,2 partes)
@@ -154,7 +160,7 @@ const app = $('#app');
 function render() {
   if (!S.user) { app.innerHTML = loginView(); return; }
   if (!SOCIOS.some(s => s.email.toLowerCase() === S.user.email)) {
-    app.innerHTML = `<div class="login"><img src="./logo.png" class="login-logo" alt="Dental Family Center"><h1>Correo no autorizado</h1>
+    app.innerHTML = `<div class="login">${brandMark('big')}<h1>Correo no autorizado</h1>
       <p class="muted">${esc(S.user.email)} no está en la lista de socios (config.js y firestore.rules).</p>
       <button class="btn btn-light btn-block" data-a="salir">Cerrar sesión</button></div>`;
     return;
@@ -170,7 +176,7 @@ function render() {
 
 function loginView() {
   return `<div class="login">
-    <img src="./logo.png" alt="Dental Family Center" class="login-logo">
+    ${brandMark('big')}
     <h1>Finanzas del laboratorio</h1>
     <p class="muted">Ingreso para socios</p>
     ${DEMO ? `
@@ -192,7 +198,7 @@ function headerView() {
   const conMes = ['inicio', 'movs', 'socios', 'mas'].includes(S.tab);
   return `<header class="top">
     <div class="top-row">
-      <img src="./logo.png" class="top-logo" alt="Dental Family Center">
+      ${brandMark()}
       <button class="user-chip" data-a="tab" data-tab="mas" title="Cuenta">
         <span class="avatar">${esc(primerNombre(S.user.email).charAt(0))}</span>${esc(primerNombre(S.user.email))}
         ${S.pending ? '<span class="sync" title="Pendiente de subir">●</span>' : ''}
