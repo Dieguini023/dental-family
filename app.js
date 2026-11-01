@@ -128,7 +128,7 @@ function repartoSocios(meses) {
 
 // ------------------------------------------------------------------ store
 const store = await createStore({
-  onAuth: u => { S.user = u; if (!u) { S.cfgLoaded = false; } render(); },
+  onAuth: u => { S.user = u; S.tab = 'inicio'; vistosIds.movs = vistosIds.trabajos = null; if (!u) { S.cfgLoaded = false; } render(); },
   onConfig: c => {
     S.cfgLoaded = true;
     if (c) {
@@ -137,13 +137,15 @@ const store = await createStore({
       if (!c.repartoV2 && esAdmin()) {
         const partes = Object.fromEntries(DEFAULT_CFG.socios.map(s => [s.email, s.pct]));
         store.setConfig({ ...c, socios: (c.socios || DEFAULT_CFG.socios).map(s => ({ ...s, pct: partes[s.email] ?? s.pct })), repartoV2: true });
+      } else if (!c.ntfyTopic && esAdmin()) {
+        store.setConfig({ ...c, ntfyTopic: nuevoCanal() });
       }
     }
     else { S.cfg = null; if (esAdmin()) store.setConfig(DEFAULT_CFG); }
     render();
   },
-  onMovs: (m, pend) => { S.movs = m; S.pending = pend; render(); },
-  onTrabajos: t => { S.trabajos = t; render(); },
+  onMovs: (m, pend) => { detectarNovedades('movs', m); S.movs = m; S.pending = pend; render(); },
+  onTrabajos: t => { detectarNovedades('trabajos', t); S.trabajos = t; render(); },
   onError: e => toast(traducirError(e), true)
 });
 function traducirError(e) {
@@ -246,7 +248,10 @@ function inicioView() {
   const max = Math.max(t.ing, t.egr, 1);
   const yo = socioDe(S.user.email);
   const avisoCopia = esAdmin() && ultimaCopia() !== hoy() && S.movs.length;
+  const nov = novedades();
   return `
+    ${nov.length ? `<div class="nov-banner"><span>🔔 <b>${nov.length} ${nov.length === 1 ? 'novedad' : 'novedades'} desde tu última visita</b><small>${esc(nov.slice(0, 2).map(n => n.txt).join(' · '))}${nov.length > 2 ? '…' : ''}</small></span><button class="btn-mini" data-a="verNovedades">Ver</button></div>` : ''}
+    ${!esAdmin() && permisoAvisos() === 'default' ? `<div class="nov-banner soft"><span>🔔 <b>¿Avisarte de cada movimiento?</b><small>Te llega una notificación cuando se registre algo</small></span><button class="btn-mini" data-a="activarAvisos">Activar</button></div>` : ''}
     ${avisoCopia ? `<div class="backup-banner"><span>💾 <b>Copia de hoy pendiente</b><small>Última: ${ultimaCopia() ? fCorta(ultimaCopia()) + '/' + ultimaCopia().slice(0, 4) : 'nunca'}</small></span><button class="btn-mini" data-a="copia">Guardar</button></div>` : ''}
     <section class="hero">
       <small>Utilidad de ${esc(nomMes(S.mes))}</small>
@@ -356,6 +361,12 @@ function masView() {
     <h2 class="sec">Pagos fijos · ${esc(nomMes(S.mes))} <span class="muted">${money(totPag)} / ${money(totRef)}</span></h2>
     <div class="card list">${fijos.filter(x => x.f.activo).map(x => `<button class="row" data-a="pagarFijo" data-c="${esc(x.f.concepto)}">
       <span class="row-main"><b>${esc(x.f.concepto)}</b><small>Día ${x.f.dia} · ref. ${x.f.valor ? money(x.f.valor) : '—'}${x.pagado ? ' · pagado ' + money(x.pagado) : ''}</small></span>${estadoChip(x.est)}</button>`).join('')}</div>
+
+    <h2 class="sec">Avisos</h2>
+    <div class="card list">
+      <button class="row" data-a="activarAvisos"><span class="row-main"><b>Avisos en este celular</b><small>${({ granted: '✓ Activados: llegan mientras la app esté abierta o reciente', denied: 'Bloqueados: actívelos en Ajustes del celular → Apps → Dental Family → Notificaciones', default: 'Toque para activarlos', none: 'Este navegador no permite avisos' })[permisoAvisos()]}</small></span><span class="go">›</span></button>
+      <button class="row" data-a="ntfyInfo"><span class="row-main"><b>Avisos con la app cerrada (ntfy)</b><small>${cfg().ntfyTopic ? 'Canal: ' + esc(cfg().ntfyTopic) : 'Se crea al abrir la app Adiela'}${cfg().ntfyOff ? ' · apagado' : ''}</small></span><span class="go">›</span></button>
+    </div>
 
     <h2 class="sec">Copia de seguridad</h2>
     <div class="card list">
@@ -473,8 +484,8 @@ function guardarMov() {
   if (f.tercero) doc.tercero = f.tercero;
   if (f.grupo === 'Socios') doc.socio = f.socio;
   if (f.grupo === 'Fijo' && f.periodo) doc.periodo = f.periodo;
-  if (f.id) { store.update('movimientos', f.id, { ...doc, editadoPor: S.user.email, editadoMs: Date.now() }); toast('Cambios guardados'); }
-  else { store.add('movimientos', { ...doc, creadoPor: S.user.email, creadoMs: Date.now() }); toast(`${f.tipo === 'Ingreso' ? 'Entrada' : f.tipo === 'Egreso' ? 'Salida' : 'Traslado'} de ${money(f.valor)} guardada`); }
+  if (f.id) { store.update('movimientos', f.id, { ...doc, editadoPor: S.user.email, editadoMs: Date.now() }); toast('Cambios guardados'); avisar('✏️ Movimiento corregido', textoMov(doc)); }
+  else { store.add('movimientos', { ...doc, creadoPor: S.user.email, creadoMs: Date.now() }); avisar(tituloMov(doc), textoMov(doc)); toast(`${f.tipo === 'Ingreso' ? 'Entrada' : f.tipo === 'Egreso' ? 'Salida' : 'Traslado'} de ${money(f.valor)} guardada`); }
   closeSheet();
 }
 
@@ -524,9 +535,10 @@ function guardarTrabajo() {
   if (S.trabajos.some(x => String(x.orden) === orden && x.id !== t.id)) return toast(`La orden ${orden} ya existe.`, true);
   const doc = { orden, fecha: g('tFecha') || hoy(), paciente: g('tPaciente').trim(), odontologo: g('tOdont').trim(), tipo: g('tTipo').trim(),
     valor: num(g('tValor')), maquinado: num(g('tMaq')), obs: g('tObs').trim() };
-  if (t.id) { store.update('trabajos', t.id, doc); toast('Trabajo actualizado'); }
+  if (t.id) { store.update('trabajos', t.id, doc); toast('Trabajo actualizado'); avisar('✏️ Trabajo actualizado', `Orden ${doc.orden} · ${doc.paciente} · ${doc.tipo}`); }
   else {
     store.add('trabajos', { ...doc, etapas: {}, creadoPor: S.user.email, creadoMs: Date.now() });
+    avisar('🦷 Nuevo trabajo', `Orden ${orden} · ${doc.paciente} · ${doc.odontologo} · ${doc.tipo}${doc.valor ? ' · ' + money(doc.valor) : ''}`);
     const ab = num(g('tAbono'));
     if (ab > 0) store.add('movimientos', { fecha: doc.fecha, tipo: 'Ingreso', categoria: 'Abono a trabajo', grupo: 'Ingreso', descripcion: `Abono inicial – ${doc.paciente}`,
       valor: ab, cuenta: g('tCuenta'), orden, tercero: doc.odontologo, creadoPor: S.user.email, creadoMs: Date.now() });
@@ -714,6 +726,102 @@ async function restaurarCopia(file) {
   } catch (e) { toast('No se pudo leer la copia: ' + (e.message || e), true); }
 }
 
+
+// ------------------------------------------------------------------ avisos
+const nuevoCanal = () => 'dentalfamily-' + Array.from(crypto.getRandomValues(new Uint8Array(9)), b => 'abcdefghijkmnpqrstuvwxyz23456789'[b % 32]).join('');
+const tituloMov = m => m.tipo === 'Ingreso' ? `💰 Entró ${money(m.valor)}` : m.tipo === 'Egreso' ? (m.categoria === 'Retiro de socio' ? `👤 Retiro de ${money(m.valor)}` : `💸 Salió ${money(m.valor)}`) : `⇄ Traslado de ${money(m.valor)}`;
+const textoMov = m => [m.categoria, m.descripcion, m.tipo === 'Traslado' ? `${m.cuenta} → ${m.cuentaDestino}` : m.cuenta, m.orden ? 'Orden ' + m.orden : '', m.socio ? nombreDe(m.socio) : ''].filter(Boolean).join(' · ');
+
+// ntfy: avisos push aunque la app esté cerrada (gratis, sin cuenta)
+const NQ = 'df-ntfy-cola';
+function avisar(title, message, forzar = false) {
+  const c = cfg(); if (!c.ntfyTopic || (c.ntfyOff && !forzar) || DEMO) return;
+  const item = { topic: c.ntfyTopic, title, message: `${message}\n— ${primerNombre(S.user.email)}, ${new Date().toLocaleString('es-CO', { dateStyle: 'short', timeStyle: 'short' })}`, tags: ['tooth'], click: location.href.split('#')[0] };
+  let q = []; try { q = JSON.parse(localStorage.getItem(NQ) || '[]'); } catch (e) {}
+  q.push(item); try { localStorage.setItem(NQ, JSON.stringify(q.slice(-50))); } catch (e) {}
+  enviarCola();
+}
+let enviando = false;
+async function enviarCola() {
+  if (enviando) return; enviando = true;
+  try {
+    let q = []; try { q = JSON.parse(localStorage.getItem(NQ) || '[]'); } catch (e) {}
+    while (q.length) {
+      const r = await fetch('https://ntfy.sh/', { method: 'POST', body: JSON.stringify(q[0]) });
+      if (!r.ok) break;
+      q.shift(); try { localStorage.setItem(NQ, JSON.stringify(q)); } catch (e) {}
+    }
+  } catch (e) { /* sin internet: se reintenta al volver la conexión */ }
+  enviando = false;
+}
+window.addEventListener('online', enviarCola);
+setTimeout(enviarCola, 3000);
+
+function ntfyHTML() {
+  const t = cfg().ntfyTopic || '(se crea cuando Adiela abra la app)';
+  return `
+    <p>Con la app gratuita <b>ntfy</b> llega una notificación al instante cada vez que ${esc(primerNombre(SOCIOS.find(s => s.rol === 'admin').email))} registra algo, <b>aunque la app esté cerrada</b>.</p>
+    <p class="lbl">Instalarlo (una sola vez por celular)</p>
+    <ol class="pasos">
+      <li>En Play Store busque e instale <b>ntfy</b> (icono verde con una campana).</li>
+      <li>Ábrala y toque el botón <b>+</b>.</li>
+      <li>En «Topic name» pegue el nombre del canal de abajo y toque <b>Subscribe</b>.</li>
+      <li>Si Android pregunta por notificaciones, toque <b>Permitir</b>.</li>
+    </ol>
+    <div class="canal"><code>${esc(t)}</code><button class="btn-mini" data-a="ntfyCopiar">Copiar</button></div>
+    <p class="hint">Mantenga este nombre en familia: quien lo conozca podría ver los avisos.</p>
+    <button class="btn btn-teal btn-block" data-a="ntfyProbar">Enviar aviso de prueba</button>
+    ${esAdmin() ? `<button class="btn btn-light btn-block" data-a="ntfyToggle">${cfg().ntfyOff ? 'Encender avisos ntfy' : 'Apagar avisos ntfy'}</button>
+      <button class="btn btn-light btn-block" data-a="ntfyNuevo">Crear canal nuevo</button>` : ''}`;
+}
+
+// Avisos dentro de la app (sin instalar nada)
+const LS_VISTO = () => 'df-visto-' + (S.user ? S.user.email : '');
+const getVisto = () => { try { return Number(localStorage.getItem(LS_VISTO())) || 0; } catch (e) { return 0; } };
+function marcarVisto() { try { localStorage.setItem(LS_VISTO(), String(Date.now())); } catch (e) {} }
+const permisoAvisos = () => ('Notification' in window) ? Notification.permission : 'none';
+function novedades() {
+  if (!S.user) return [];
+  const v = getVisto(); if (!v) { marcarVisto(); return []; }
+  const me = S.user.email, out = [];
+  S.movs.forEach(m => {
+    const t = Math.max(m.creadoMs || 0, m.editadoMs || 0), por = m.editadoMs > (m.creadoMs || 0) ? m.editadoPor : m.creadoPor;
+    if (t > v && por !== me) out.push({ t, txt: `${m.tipo === 'Ingreso' ? '+' : m.tipo === 'Egreso' ? '−' : '⇄'}${money(m.valor)} ${m.categoria}` });
+  });
+  S.trabajos.forEach(tr => {
+    const t = Math.max(tr.creadoMs || 0, tr.editadoMs || 0), por = tr.editadoMs > (tr.creadoMs || 0) ? tr.editadoPor : tr.creadoPor;
+    if (t > v && por !== me) out.push({ t, txt: `Orden ${tr.orden}` });
+  });
+  return out.sort((a, b) => b.t - a.t);
+}
+const vistosIds = { movs: null, trabajos: null };
+function detectarNovedades(tipo, docs) {
+  if (!S.user) return;
+  const prev = vistosIds[tipo];
+  vistosIds[tipo] = new Map(docs.map(d => [d.id, Math.max(d.creadoMs || 0, d.editadoMs || 0)]));
+  if (!prev) return; // primera carga
+  const me = S.user.email;
+  docs.forEach(d => {
+    const t = Math.max(d.creadoMs || 0, d.editadoMs || 0);
+    if (prev.has(d.id) && prev.get(d.id) === t) return;
+    const por = d.editadoMs > (d.creadoMs || 0) ? d.editadoPor : d.creadoPor;
+    if (!por || por === me) return;
+    const nuevo = !prev.has(d.id);
+    const title = tipo === 'movs' ? (nuevo ? tituloMov(d) : (d.anulado ? '🚫 Movimiento anulado' : '✏️ Movimiento corregido')) : (nuevo ? '🦷 Nuevo trabajo' : '🦷 Trabajo actualizado');
+    const body = tipo === 'movs' ? textoMov(d) : `Orden ${d.orden} · ${d.paciente || ''} · ${d.tipo || ''}`;
+    toast(`${title} · ${primerNombre(por)}`);
+    notificar(title, `${body} — ${primerNombre(por)}`);
+  });
+}
+async function notificar(title, body) {
+  if (permisoAvisos() !== 'granted') return;
+  try {
+    const reg = navigator.serviceWorker && await navigator.serviceWorker.getRegistration();
+    const opt = { body, icon: './icon-192.png', badge: './icon-192.png', tag: 'df-' + Date.now(), vibrate: [120, 60, 120] };
+    if (reg) await reg.showNotification(title, opt); else new Notification(title, opt);
+  } catch (e) {}
+}
+
 // ------------------------------------------------------------------ toast
 let toastT;
 function toast(msg, bad = false) {
@@ -748,19 +856,32 @@ document.addEventListener('click', e => {
     nuevoMov: () => openMov(),
     verMov: () => verMov(a.dataset.id),
     guardarMov,
-    anularMov: () => { const f = sheetState; if (!confirm(f.anulado ? '¿Restaurar este movimiento?' : '¿Anular este movimiento? Dejará de contar en los totales.')) return; store.update('movimientos', f.id, { anulado: !f.anulado, editadoPor: S.user.email, editadoMs: Date.now() }); toast(f.anulado ? 'Restaurado' : 'Movimiento anulado'); closeSheet(); },
+    anularMov: () => { const f = sheetState; if (!confirm(f.anulado ? '¿Restaurar este movimiento?' : '¿Anular este movimiento? Dejará de contar en los totales.')) return; store.update('movimientos', f.id, { anulado: !f.anulado, editadoPor: S.user.email, editadoMs: Date.now() }); avisar(f.anulado ? '↩️ Movimiento restaurado' : '🚫 Movimiento anulado', textoMov(f)); toast(f.anulado ? 'Restaurado' : 'Movimiento anulado'); closeSheet(); },
     valorSaldo: () => { readMovInputs(); const tr = S.trabajos.find(t => String(t.orden) === String(sheetState.orden)); if (tr) { sheetState.valor = saldoTrabajo(tr); sheetState.categoria = sheetState.valor >= tr.valor ? 'Pago de trabajo' : sheetState.categoria; } setSheetBody(movForm(sheetState)); },
     nuevoTrabajo: () => { sheetState = {}; openSheet('Nuevo trabajo', trabajoForm({})); },
     verTrabajo: () => verTrabajo(a.dataset.id),
     editarTrabajo: () => { openSheet(`Editar orden ${sheetState.orden}`, trabajoForm(sheetState)); },
     guardarTrabajo,
     borrarTrabajo: () => { if (confirm('¿Eliminar este trabajo? Los pagos registrados no se borran.')) { store.remove('trabajos', sheetState.id); toast('Trabajo eliminado'); closeSheet(); } },
-    etapa: () => { const t = sheetState; store.update('trabajos', t.id, { etapas: { ...(t.etapas || {}), [a.dataset.e]: hoy() } }); toast(`${a.dataset.e} · registrado`); closeSheet(); },
+    etapa: () => { const t = sheetState; store.update('trabajos', t.id, { etapas: { ...(t.etapas || {}), [a.dataset.e]: hoy() }, editadoPor: S.user.email, editadoMs: Date.now() }); avisar(`🦷 ${a.dataset.e}`, `Orden ${t.orden} · ${t.paciente || ''} · ${t.tipo}`); toast(`${a.dataset.e} · registrado`); closeSheet(); },
     abonar: () => { const t = sheetState, s = saldoTrabajo(t); openMov({ tipo: 'Ingreso', categoria: s >= t.valor ? 'Pago de trabajo' : 'Abono a trabajo', orden: String(t.orden), tercero: t.odontologo, descripcion: `${t.tipo} – ${t.paciente}`.trim() }); },
     pagarFijo: () => { if (!esAdmin()) return; const f = cfg().fijos.find(x => x.concepto === a.dataset.c); const st = estadoFijo(f, S.mes); openMov({ tipo: 'Egreso', categoria: f.concepto, valor: Math.max((f.valor || 0) - st.pagado, 0), periodo: S.mes, descripcion: `${f.concepto} ${nomMes(S.mes)}`, cuenta: cfg().cuentas.find(c => /banco/i.test(c)) || cfg().cuentas[0] }); },
     retiro: () => openMov({ tipo: 'Egreso', categoria: 'Retiro de socio', descripcion: 'Retiro de utilidades' }),
     exportar, resumenMes,
     copia: descargarCopia,
+    verNovedades: () => { marcarVisto(); S.tab = 'movs'; render(); window.scrollTo(0, 0); },
+    activarAvisos: async () => {
+      if (!('Notification' in window)) return toast('Este celular no permite avisos desde aquí. Use ntfy.', true);
+      const p = await Notification.requestPermission();
+      if (p === 'granted') { toast('Avisos activados'); notificar('Dental Family', 'Así se verán los avisos de cada movimiento.'); }
+      else toast('No se activaron. Puede hacerlo en Ajustes del celular → Apps → Dental Family → Notificaciones.', true);
+      render();
+    },
+    ntfyInfo: () => { sheetState = null; openSheet('Avisos con la app cerrada', ntfyHTML()); },
+    ntfyCopiar: () => { const t = cfg().ntfyTopic; (navigator.clipboard ? navigator.clipboard.writeText(t) : Promise.reject()).then(() => toast('Nombre del canal copiado')).catch(() => prompt('Copie el nombre del canal:', t)); },
+    ntfyProbar: () => { avisar('🔔 Prueba de Dental Family', `Aviso de prueba enviado por ${primerNombre(S.user.email)}`, true); toast('Aviso de prueba enviado'); },
+    ntfyToggle: () => { store.setConfig({ ...JSON.parse(JSON.stringify(cfg())), ntfyOff: !cfg().ntfyOff }); toast(cfg().ntfyOff ? 'Avisos ntfy encendidos' : 'Avisos ntfy apagados'); closeSheet(); },
+    ntfyNuevo: () => { if (!confirm('Se creará un canal nuevo. Todos tendrán que suscribirse otra vez en ntfy. ¿Continuar?')) return; store.setConfig({ ...JSON.parse(JSON.stringify(cfg())), ntfyTopic: nuevoCanal() }); toast('Canal nuevo creado'); closeSheet(); },
     reiniciar: async () => {
       if (!confirm(`Se borrarán TODOS los registros actuales (${S.movs.length} movimientos y ${S.trabajos.length} trabajos) y quedarán solo los datos del Excel (10 movimientos y 6 trabajos de octubre).\n\nLos ajustes y el reparto entre socios se conservan.\n\n¿Continuar?`)) return;
       const ok = prompt('Para confirmar, escriba BORRAR');
