@@ -1,5 +1,5 @@
 // Service worker: permite abrir la app sin conexión.
-const CACHE = 'df-v2';
+const CACHE = 'df-v3';
 const SHELL = ['./', './index.html', './styles.css', './app.js', './data.js', './config.js', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', e => { e.waitUntil(caches.open(CACHE).then(c => c.addAll(SHELL))); self.skipWaiting(); });
@@ -15,7 +15,7 @@ self.addEventListener('fetch', e => {
   const cacheable = u.origin === location.origin || u.hostname === 'www.gstatic.com' || u.hostname.startsWith('fonts.') || u.hostname === 'cdnjs.cloudflare.com';
   if (!cacheable) return;
   // Red primero (para recibir actualizaciones), caché si no hay internet
-  e.respondWith(fetch(e.request).then(r => {
+  e.respondWith(fetch(e.request, u.origin === location.origin ? { cache: 'no-cache' } : {}).then(r => {
     if (r.ok || r.type === 'opaque') { const cp = r.clone(); caches.open(CACHE).then(c => c.put(e.request, cp)); }
     return r;
   }).catch(() => caches.match(e.request).then(r => r || caches.match('./index.html'))));
