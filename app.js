@@ -20,7 +20,9 @@ const daysInMonth = m => { const [y, mm] = m.split('-').map(Number); return new 
 
 // ------------------------------------------------------------------ configuración por defecto
 const DEFAULT_CFG = {
-  socios: SOCIOS.map((s, i) => ({ nombre: s.nombre, email: s.email.toLowerCase(), pct: i === 0 ? 33.34 : 33.33 })),
+  // pct = PARTES de cada socio (la ganancia se reparte en proporción: Adiela 10,2 · Alirio 25 · Hernán 25 = 60,2 partes)
+  socios: SOCIOS.map(s => ({ nombre: s.nombre, email: s.email.toLowerCase(), pct: /adiela/i.test(s.nombre) ? 10.2 : 25 })),
+  repartoV2: true,
   cuentas: ['Caja (efectivo)', 'Nequi', 'Banco'],
   saldosIniciales: {},
   pctGastos: 27,
@@ -61,6 +63,10 @@ const socioDe = email => cfg().socios.find(s => s.email === email) || SOCIOS.fin
 const esAdmin = () => !!S.user && !!SOCIOS.find(s => s.email.toLowerCase() === S.user.email && s.rol === 'admin');
 const nombreDe = email => (socioDe(email) || {}).nombre || email || '';
 const primerNombre = email => nombreDe(email).split(' ')[0];
+const totalPartes = () => cfg().socios.reduce((a, s) => a + (Number(s.pct) || 0), 0) || 1;
+const pctDe = s => (Number(s.pct) || 0) / totalPartes() * 100;
+const fPct = v => (Math.round(v * 100) / 100).toLocaleString('es-CO', { maximumFractionDigits: 2 }) + ' %';
+const fNum = v => (Number(v) || 0).toLocaleString('es-CO', { maximumFractionDigits: 2 });
 
 // ------------------------------------------------------------------ cálculos
 const vivos = () => S.movs.filter(m => !m.anulado);
@@ -107,7 +113,7 @@ function estadoFijo(f, mes) {
 function repartoSocios(meses) {
   let util = 0; meses.forEach(m => util += totalesMes(m).util);
   return cfg().socios.map(s => {
-    const corresponde = util * (s.pct || 0) / 100;
+    const corresponde = util * (Number(s.pct) || 0) / totalPartes();
     const ret = vivos().filter(m => m.categoria === 'Retiro de socio' && m.socio === s.email && meses.includes(mesCont(m))).reduce((a, m) => a + m.valor, 0);
     const apo = vivos().filter(m => m.categoria === 'Aporte de socio' && m.socio === s.email && meses.includes(mesCont(m))).reduce((a, m) => a + m.valor, 0);
     return { ...s, corresponde, retirado: ret, aportado: apo, saldo: corresponde - ret + apo };
@@ -119,7 +125,14 @@ const store = await createStore({
   onAuth: u => { S.user = u; if (!u) { S.cfgLoaded = false; } render(); },
   onConfig: c => {
     S.cfgLoaded = true;
-    if (c) S.cfg = { ...DEFAULT_CFG, ...c };
+    if (c) {
+      S.cfg = { ...DEFAULT_CFG, ...c };
+      // Migración: pasar del reparto 33/33/33 a las partes reales (10,2 · 25 · 25)
+      if (!c.repartoV2 && esAdmin()) {
+        const partes = Object.fromEntries(DEFAULT_CFG.socios.map(s => [s.email, s.pct]));
+        store.setConfig({ ...c, socios: (c.socios || DEFAULT_CFG.socios).map(s => ({ ...s, pct: partes[s.email] ?? s.pct })), repartoV2: true });
+      }
+    }
     else { S.cfg = null; if (esAdmin()) store.setConfig(DEFAULT_CFG); }
     render();
   },
@@ -232,7 +245,7 @@ function inicioView() {
     <section class="hero">
       <small>Utilidad de ${esc(nomMes(S.mes))}</small>
       <div class="hero-num ${t.util < 0 ? 'neg' : ''}">${money(t.util)}</div>
-      ${yo && yo.pct ? `<div class="hero-sub">Tu parte (${yo.pct}%): <b>${money(t.util * yo.pct / 100)}</b></div>` : ''}
+      ${yo && yo.pct ? `<div class="hero-sub">Tu parte (${fPct(pctDe(yo))}): <b>${money(t.util * pctDe(yo) / 100)}</b></div>` : ''}
       <div class="bars">
         <div><span>Entró</span><i style="width:${t.ing / max * 100}%" class="b-in"></i><b>${money(t.ing)}</b></div>
         <div><span>Salió</span><i style="width:${t.egr / max * 100}%" class="b-out"></i><b>${money(t.egr)}</b></div>
@@ -311,15 +324,13 @@ function trabajosView() {
 function sociosView() {
   const meses = S.socAnual ? Array.from({ length: +S.mes.slice(5) }, (_, i) => `${S.mes.slice(0, 4)}-${pad(i + 1)}`) : [S.mes];
   const rep = repartoSocios(meses), util = rep.pop()._util;
-  const sumPct = cfg().socios.reduce((a, s) => a + (s.pct || 0), 0);
   return `
     <div class="seg"><button class="${!S.socAnual ? 'on' : ''}" data-a="socAnual" data-v="0">Este mes</button><button class="${S.socAnual ? 'on' : ''}" data-a="socAnual" data-v="1">Año ${S.mes.slice(0, 4)} acumulado</button></div>
     <section class="hero small"><small>Utilidad a repartir · ${S.socAnual ? 'ene – ' + MESES[+S.mes.slice(5) - 1] + ' ' + S.mes.slice(0, 4) : esc(nomMes(S.mes))}</small>
       <div class="hero-num ${util < 0 ? 'neg' : ''}">${money(util)}</div>
       <div class="hero-sub">Ingresos − gastos del laboratorio. No incluye retiros ni aportes de socios.</div></section>
-    ${Math.abs(sumPct - 100) > 0.05 ? `<p class="hint warnbox">Los porcentajes suman ${sumPct}%. Deben sumar 100%: ajústelos en Más → Porcentajes.</p>` : ''}
     ${rep.map(s => `<div class="socio ${s.email === S.user.email ? 'yo' : ''}">
-      <div class="socio-top"><span class="avatar big">${esc(s.nombre.charAt(0))}</span><div><b>${esc(s.nombre)}</b>${s.email === S.user.email ? ' <span class="chip st-pagado">Tú</span>' : ''}<small>${s.pct}% de participación</small></div></div>
+      <div class="socio-top"><span class="avatar big">${esc(s.nombre.charAt(0))}</span><div><b>${esc(s.nombre)}</b>${s.email === S.user.email ? ' <span class="chip st-pagado">Tú</span>' : ''}<small>${fPct(pctDe(s))} · ${fNum(s.pct)} de ${fNum(totalPartes())} partes</small></div></div>
       <div class="socio-grid">
         <div><small>Le corresponde</small><b class="${s.corresponde < 0 ? 'neg' : ''}">${money(s.corresponde)}</b></div>
         <div><small>Ya retiró</small><b>${money(s.retirado)}</b></div>
@@ -354,7 +365,7 @@ function masView() {
 
     ${esAdmin() ? `<h2 class="sec">Ajustes (solo ${esc(primerNombre(S.user.email))})</h2>
     <div class="card list">
-      <button class="row" data-a="cfgPct"><span class="row-main"><b>Porcentajes de los socios</b><small>${cfg().socios.map(s => primerNombre(s.email) + ' ' + s.pct + '%').join(' · ')}</small></span><span class="go">›</span></button>
+      <button class="row" data-a="cfgPct"><span class="row-main"><b>Reparto entre socios</b><small>${cfg().socios.map(s => primerNombre(s.email) + ' ' + fNum(s.pct)).join(' · ')} partes</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgSaldos"><span class="row-main"><b>Saldos iniciales</b><small>Dinero con que arrancó cada cuenta</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgFijos"><span class="row-main"><b>Pagos fijos</b><small>Valor de referencia y día de pago</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgListas"><span class="row-main"><b>Listas</b><small>Odontólogos, tipos de trabajo, cuentas</small></span><span class="go">›</span></button>
@@ -543,8 +554,9 @@ function verTrabajo(id) {
 // ---- configuración
 function cfgSheet(kind) {
   const c = cfg();
-  if (kind === 'pct') openSheet('Porcentajes de los socios', `
-    ${c.socios.map((s, i) => `<label class="fl">${esc(s.nombre)} (%)<input class="cfgPct" data-i="${i}" inputmode="decimal" value="${s.pct}"></label>`).join('')}
+  if (kind === 'pct') openSheet('Reparto entre socios', `
+    <p class="hint">Escriba las <b>partes</b> de cada socio. La ganancia se divide entre el total de partes y se multiplica por las de cada uno (ej.: 25 + 25 + 10,2 = 60,2).</p>
+    ${c.socios.map((s, i) => `<label class="fl">${esc(s.nombre)} · partes<input class="cfgPct" data-i="${i}" inputmode="decimal" value="${fNum(s.pct)}"></label>`).join('')}
     <p class="hint" id="pctSum"></p>
     <button class="btn btn-primary btn-block" data-a="saveCfg" data-k="pct">Guardar</button>`);
   if (kind === 'saldos') openSheet('Saldos iniciales', `
@@ -570,9 +582,10 @@ function saveCfg(k) {
   const c = JSON.parse(JSON.stringify(cfg()));
   const lines = id => document.getElementById(id).value.split('\n').map(s => s.trim()).filter(Boolean);
   if (k === 'pct') {
-    document.querySelectorAll('.cfgPct').forEach(el => c.socios[+el.dataset.i].pct = Number(el.value.replace(',', '.')) || 0);
+    document.querySelectorAll('.cfgPct').forEach(el => c.socios[+el.dataset.i].pct = Number(el.value.replace(/\./g, '').replace(',', '.')) || 0);
     const sum = c.socios.reduce((a, s) => a + s.pct, 0);
-    if (Math.abs(sum - 100) > 0.05) return toast(`Suman ${sum}%. Deben sumar 100%.`, true);
+    if (sum <= 0) return toast('Escriba las partes de cada socio.', true);
+    c.repartoV2 = true;
   }
   if (k === 'saldos') { c.saldosIniciales = {}; document.querySelectorAll('.cfgSal').forEach(el => c.saldosIniciales[el.dataset.c] = num(el.value)); }
   if (k === 'fijos') {
@@ -763,7 +776,10 @@ document.addEventListener('input', e => {
     S[id] = e.target.value; const pos = e.target.selectionStart; render();
     const el = document.getElementById(id); el.focus(); el.setSelectionRange(pos, pos);
   }
-  if (e.target.classList.contains('cfgPct')) { const s = [...document.querySelectorAll('.cfgPct')].reduce((a, el) => a + (Number(el.value.replace(',', '.')) || 0), 0); $('#pctSum').textContent = `Suma: ${Math.round(s * 100) / 100}%`; }
+  if (e.target.classList.contains('cfgPct')) {
+    const els = [...document.querySelectorAll('.cfgPct')], vals = els.map(el => Number(el.value.replace(/\./g, '').replace(',', '.')) || 0), s = vals.reduce((a, b) => a + b, 0);
+    $('#pctSum').innerHTML = s ? `Total: ${fNum(s)} partes → ` + cfg().socios.map((x, i) => `${esc(primerNombre(x.email))} ${fPct(vals[i] / s * 100)}`).join(' · ') : '';
+  }
 });
 document.addEventListener('change', e => {
   if (e.target.id === 'mesPick' && e.target.value) { S.mes = e.target.value; render(); }
