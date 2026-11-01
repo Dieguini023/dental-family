@@ -452,7 +452,10 @@ function movForm(f) {
     </div>
     ${esFijo ? `<label class="fl">Mes que se paga<input id="fPeriodo" type="month" value="${esc(f.periodo || S.mes)}"></label>` : ''}
     <button class="btn btn-primary btn-block btn-lg" data-a="guardarMov">${f.id ? 'Guardar cambios' : 'Guardar'}</button>
-    ${f.id ? `<button class="btn btn-light btn-block" data-a="anularMov">${f.anulado ? 'Restaurar movimiento' : 'Anular movimiento'}</button>` : ''}`;
+    ${f.id ? `<div class="two">
+      <button class="btn btn-light btn-block" data-a="anularMov">${f.anulado ? '↩️ Restaurar' : '🚫 Anular'}</button>
+      <button class="btn btn-danger btn-block" data-a="eliminarMov">🗑️ Eliminar</button></div>
+      <p class="hint">«Anular» lo deja tachado en el historial (no cuenta en los totales). «Eliminar» lo borra del todo: úselo para pruebas o errores.</p>` : ''}`;
 }
 function readMovInputs() {
   const f = sheetState; if (!f) return;
@@ -525,7 +528,7 @@ function trabajoForm(t) {
       <label class="fl">Recibido en<select id="tCuenta">${c.cuentas.map(x => `<option>${esc(x)}</option>`).join('')}</select></label></div>` : ''}
     <label class="fl">Observaciones<input id="tObs" value="${esc(t.obs || '')}"></label>
     <button class="btn btn-teal btn-block btn-lg" data-a="guardarTrabajo">${t.id ? 'Guardar cambios' : 'Guardar trabajo'}</button>
-    ${t.id ? `<button class="btn btn-light btn-block" data-a="borrarTrabajo">Eliminar trabajo</button>` : ''}`;
+`;
 }
 function guardarTrabajo() {
   const t = sheetState, g = id => (document.getElementById(id) || {}).value;
@@ -535,7 +538,10 @@ function guardarTrabajo() {
   if (S.trabajos.some(x => String(x.orden) === orden && x.id !== t.id)) return toast(`La orden ${orden} ya existe.`, true);
   const doc = { orden, fecha: g('tFecha') || hoy(), paciente: g('tPaciente').trim(), odontologo: g('tOdont').trim(), tipo: g('tTipo').trim(),
     valor: num(g('tValor')), maquinado: num(g('tMaq')), obs: g('tObs').trim() };
-  if (t.id) { store.update('trabajos', t.id, doc); toast('Trabajo actualizado'); avisar('✏️ Trabajo actualizado', `Orden ${doc.orden} · ${doc.paciente} · ${doc.tipo}`); }
+  if (t.id) {
+    store.update('trabajos', t.id, { ...doc, editadoPor: S.user.email, editadoMs: Date.now() });
+    if (String(t.orden) !== orden) S.movs.filter(m => String(m.orden || '') === String(t.orden)).forEach(m => store.update('movimientos', m.id, { orden, editadoPor: S.user.email, editadoMs: Date.now() }));
+    toast(String(t.orden) !== orden ? `Trabajo actualizado · sus pagos pasaron a la orden ${orden}` : 'Trabajo actualizado'); avisar('✏️ Trabajo actualizado', `Orden ${doc.orden} · ${doc.paciente} · ${doc.tipo}`); }
   else {
     store.add('trabajos', { ...doc, etapas: {}, creadoPor: S.user.email, creadoMs: Date.now() });
     avisar('🦷 Nuevo trabajo', `Orden ${orden} · ${doc.paciente} · ${doc.odontologo} · ${doc.tipo}${doc.valor ? ' · ' + money(doc.valor) : ''}`);
@@ -566,7 +572,12 @@ function verTrabajo(id) {
       ${esAdmin() ? `
         ${next ? `<button class="btn btn-teal btn-block" data-a="etapa" data-e="${esc(next)}">Marcar «${esc(next)}» hoy</button>` : ''}
         ${s > 0 ? `<button class="btn btn-primary btn-block" data-a="abonar">Registrar pago o abono</button>` : ''}
-        <button class="btn btn-light btn-block" data-a="editarTrabajo">Editar datos</button>` : ''}
+        ${abonos.length ? `<p class="hint">Para corregir o quitar un pago, tóquelo en la lista «Pagos recibidos».</p>` : ''}
+        <div class="two">
+          <button class="btn btn-light btn-block" data-a="editarTrabajo">✏️ Editar datos</button>
+          <button class="btn btn-danger btn-block" data-a="borrarTrabajo">🗑️ Eliminar</button>
+        </div>
+        ${etapaActual(t) ? `<button class="link" data-a="quitarEtapa">Deshacer última etapa («${esc(etapaActual(t))}»)</button>` : ''}` : ''}
     </div>`);
 }
 
@@ -798,12 +809,18 @@ const vistosIds = { movs: null, trabajos: null };
 function detectarNovedades(tipo, docs) {
   if (!S.user) return;
   const prev = vistosIds[tipo];
-  vistosIds[tipo] = new Map(docs.map(d => [d.id, Math.max(d.creadoMs || 0, d.editadoMs || 0)]));
+  vistosIds[tipo] = new Map(docs.map(d => [d.id, { t: Math.max(d.creadoMs || 0, d.editadoMs || 0), d }]));
   if (!prev) return; // primera carga
   const me = S.user.email;
+  if (!esAdmin()) prev.forEach((v, id) => {
+    if (vistosIds[tipo].has(id)) return;
+    const d = v.d, title = tipo === 'movs' ? '🗑️ Movimiento eliminado' : '🗑️ Trabajo eliminado';
+    const body = tipo === 'movs' ? `${money(d.valor)} · ${textoMov(d)}` : `Orden ${d.orden} · ${d.paciente || ''}`;
+    toast(title); notificar(title, body);
+  });
   docs.forEach(d => {
     const t = Math.max(d.creadoMs || 0, d.editadoMs || 0);
-    if (prev.has(d.id) && prev.get(d.id) === t) return;
+    if (prev.has(d.id) && prev.get(d.id).t === t) return;
     const por = d.editadoMs > (d.creadoMs || 0) ? d.editadoPor : d.creadoPor;
     if (!por || por === me) return;
     const nuevo = !prev.has(d.id);
@@ -862,7 +879,34 @@ document.addEventListener('click', e => {
     verTrabajo: () => verTrabajo(a.dataset.id),
     editarTrabajo: () => { openSheet(`Editar orden ${sheetState.orden}`, trabajoForm(sheetState)); },
     guardarTrabajo,
-    borrarTrabajo: () => { if (confirm('¿Eliminar este trabajo? Los pagos registrados no se borran.')) { store.remove('trabajos', sheetState.id); toast('Trabajo eliminado'); closeSheet(); } },
+    borrarTrabajo: () => {
+      const t = sheetState, pagos = S.movs.filter(m => String(m.orden || '') === String(t.orden));
+      const total = pagos.filter(m => !m.anulado).reduce((x, m) => x + m.valor, 0);
+      if (!pagos.length) {
+        if (!confirm(`¿Eliminar la orden ${t.orden} (${t.paciente || 'sin paciente'})? Esta acción no se puede deshacer.`)) return;
+      } else {
+        if (!confirm(`La orden ${t.orden} tiene ${pagos.length} pago(s) registrados por ${money(total)}.\n\nSe eliminarán el trabajo Y sus pagos, y el dinero dejará de contar en la caja.\n\n¿Continuar?`)) return;
+        if ((prompt('Para confirmar, escriba BORRAR') || '').trim().toUpperCase() !== 'BORRAR') return toast('Cancelado. No se borró nada.');
+        pagos.forEach(m => store.remove('movimientos', m.id));
+      }
+      store.remove('trabajos', t.id);
+      avisar('🗑️ Trabajo eliminado', `Orden ${t.orden} · ${t.paciente || ''} · ${t.tipo || ''}${pagos.length ? ` · con ${pagos.length} pago(s) por ${money(total)}` : ''}`);
+      toast('Trabajo eliminado'); closeSheet();
+    },
+    quitarEtapa: () => {
+      const t = sheetState, ult = etapaActual(t); if (!ult) return;
+      if (!confirm(`¿Quitar la etapa «${ult}»?`)) return;
+      const et = { ...(t.etapas || {}) }; delete et[ult];
+      store.update('trabajos', t.id, { etapas: et, editadoPor: S.user.email, editadoMs: Date.now() });
+      toast(`Etapa «${ult}» quitada`); closeSheet();
+    },
+    eliminarMov: () => {
+      const f = sheetState;
+      if (!confirm(`¿Eliminar definitivamente este movimiento de ${money(f.valor)} (${f.categoria})?\n\nNo quedará en el historial y no se puede deshacer.`)) return;
+      store.remove('movimientos', f.id);
+      avisar('🗑️ Movimiento eliminado', textoMov(f));
+      toast('Movimiento eliminado'); closeSheet();
+    },
     etapa: () => { const t = sheetState; store.update('trabajos', t.id, { etapas: { ...(t.etapas || {}), [a.dataset.e]: hoy() }, editadoPor: S.user.email, editadoMs: Date.now() }); avisar(`🦷 ${a.dataset.e}`, `Orden ${t.orden} · ${t.paciente || ''} · ${t.tipo}`); toast(`${a.dataset.e} · registrado`); closeSheet(); },
     abonar: () => { const t = sheetState, s = saldoTrabajo(t); openMov({ tipo: 'Ingreso', categoria: s >= t.valor ? 'Pago de trabajo' : 'Abono a trabajo', orden: String(t.orden), tercero: t.odontologo, descripcion: `${t.tipo} – ${t.paciente}`.trim() }); },
     pagarFijo: () => { if (!esAdmin()) return; const f = cfg().fijos.find(x => x.concepto === a.dataset.c); const st = estadoFijo(f, S.mes); openMov({ tipo: 'Egreso', categoria: f.concepto, valor: Math.max((f.valor || 0) - st.pagado, 0), periodo: S.mes, descripcion: `${f.concepto} ${nomMes(S.mes)}`, cuenta: cfg().cuentas.find(c => /banco/i.test(c)) || cfg().cuentas[0] }); },

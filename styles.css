@@ -223,3 +223,6 @@ input, select, textarea { font: inherit; color: var(--ink); }
 .pasos { padding-left: 20px; margin: 4px 0 12px; } .pasos li { margin: 6px 0; }
 .canal { display: flex; align-items: center; gap: 10px; background: var(--card); border: 1.5px dashed var(--teal); border-radius: 12px; padding: 10px 12px; }
 .canal code { flex: 1; font-size: 14px; font-weight: 700; word-break: break-all; color: var(--navy); }
+
+.btn-danger { background: var(--card); color: var(--red); border: 1.5px solid #F3C4C4; }
+.two .btn { margin-top: 10px; }
