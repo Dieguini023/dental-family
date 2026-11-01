@@ -763,7 +763,7 @@ function ntfyHTML() {
     <p>Con la app gratuita <b>ntfy</b> llega una notificación al instante cada vez que ${esc(primerNombre(SOCIOS.find(s => s.rol === 'admin').email))} registra algo, <b>aunque la app esté cerrada</b>.</p>
     <p class="lbl">Instalarlo (una sola vez por celular)</p>
     <ol class="pasos">
-      <li>En Play Store busque e instale <b>ntfy</b> (icono verde con una campana).</li>
+      <li>En Play Store busque e instale <b>ntfy</b> (de Philipp C. Heckel, icono verde con «>_»).</li>
       <li>Ábrala y toque el botón <b>+</b>.</li>
       <li>En «Topic name» pegue el nombre del canal de abajo y toque <b>Subscribe</b>.</li>
       <li>Si Android pregunta por notificaciones, toque <b>Permitir</b>.</li>
