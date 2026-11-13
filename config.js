@@ -16,9 +16,9 @@ export const firebaseConfig = {
   appId: "1:864969773305:web:a2dd1a5c4d9767e5c75228"
 };
 
-// rol "admin" = registra y edita (Adiela). rol "lectura" = solo consulta.
+// rol "admin" = registra y edita (Adiela y Hernán). rol "lectura" = solo consulta.
 export const SOCIOS = [
   { nombre: "Adiela Quiroga",     email: "adielainesquiroga@gmail.com",  rol: "admin"   },
   { nombre: "Alirio Muñoz",       email: "laboratoriotecnodent@hotmail.com",  rol: "lectura" },
-  { nombre: "Hernán Darío Muñoz", email: "mq.hernand03@gmail.com",  rol: "lectura" }
+  { nombre: "Hernán Darío Muñoz", email: "mq.hernand03@gmail.com",  rol: "admin"   }
 ];

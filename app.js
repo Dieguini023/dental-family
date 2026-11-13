@@ -380,7 +380,7 @@ function masView() {
       <button class="row" data-a="resumenMes"><span class="row-main"><b>Resumen de ${esc(nomMes(S.mes))}</b><small>Gastos por categoría</small></span><span class="go">›</span></button>
     </div>
 
-    ${esAdmin() ? `<h2 class="sec">Ajustes (solo ${esc(primerNombre(S.user.email))})</h2>
+    ${esAdmin() ? `<h2 class="sec">Ajustes (administradores)</h2>
     <div class="card list">
       <button class="row" data-a="cfgPct"><span class="row-main"><b>Reparto entre socios</b><small>${cfg().socios.map(s => primerNombre(s.email) + ' ' + fNum(s.pct)).join(' · ')} partes</small></span><span class="go">›</span></button>
       <button class="row" data-a="cfgSaldos"><span class="row-main"><b>Saldos iniciales</b><small>Dinero con que arrancó cada cuenta</small></span><span class="go">›</span></button>
@@ -771,7 +771,7 @@ setTimeout(enviarCola, 3000);
 function ntfyHTML() {
   const t = cfg().ntfyTopic || '(se crea cuando Adiela abra la app)';
   return `
-    <p>Con la app gratuita <b>ntfy</b> llega una notificación al instante cada vez que ${esc(primerNombre(SOCIOS.find(s => s.rol === 'admin').email))} registra algo, <b>aunque la app esté cerrada</b>.</p>
+    <p>Con la app gratuita <b>ntfy</b> llega una notificación al instante cada vez que ${esc(SOCIOS.filter(s => s.rol === 'admin').map(s => s.nombre.split(' ')[0]).join(' o '))} registra algo, <b>aunque la app esté cerrada</b>.</p>
     <p class="lbl">Instalarlo (una sola vez por celular)</p>
     <ol class="pasos">
       <li>En Play Store busque e instale <b>ntfy</b> (de Philipp C. Heckel, icono verde con «>_»).</li>
@@ -806,14 +806,15 @@ function novedades() {
   return out.sort((a, b) => b.t - a.t);
 }
 const vistosIds = { movs: null, trabajos: null };
+const borradosPorMi = new Set();
 function detectarNovedades(tipo, docs) {
   if (!S.user) return;
   const prev = vistosIds[tipo];
   vistosIds[tipo] = new Map(docs.map(d => [d.id, { t: Math.max(d.creadoMs || 0, d.editadoMs || 0), d }]));
   if (!prev) return; // primera carga
   const me = S.user.email;
-  if (!esAdmin()) prev.forEach((v, id) => {
-    if (vistosIds[tipo].has(id)) return;
+  prev.forEach((v, id) => {
+    if (vistosIds[tipo].has(id) || borradosPorMi.has(id)) return;
     const d = v.d, title = tipo === 'movs' ? '🗑️ Movimiento eliminado' : '🗑️ Trabajo eliminado';
     const body = tipo === 'movs' ? `${money(d.valor)} · ${textoMov(d)}` : `Orden ${d.orden} · ${d.paciente || ''}`;
     toast(title); notificar(title, body);
@@ -887,9 +888,9 @@ document.addEventListener('click', e => {
       } else {
         if (!confirm(`La orden ${t.orden} tiene ${pagos.length} pago(s) registrados por ${money(total)}.\n\nSe eliminarán el trabajo Y sus pagos, y el dinero dejará de contar en la caja.\n\n¿Continuar?`)) return;
         if ((prompt('Para confirmar, escriba BORRAR') || '').trim().toUpperCase() !== 'BORRAR') return toast('Cancelado. No se borró nada.');
-        pagos.forEach(m => store.remove('movimientos', m.id));
+        pagos.forEach(m => { borradosPorMi.add(m.id); store.remove('movimientos', m.id); });
       }
-      store.remove('trabajos', t.id);
+      borradosPorMi.add(t.id); store.remove('trabajos', t.id);
       avisar('🗑️ Trabajo eliminado', `Orden ${t.orden} · ${t.paciente || ''} · ${t.tipo || ''}${pagos.length ? ` · con ${pagos.length} pago(s) por ${money(total)}` : ''}`);
       toast('Trabajo eliminado'); closeSheet();
     },
@@ -903,7 +904,7 @@ document.addEventListener('click', e => {
     eliminarMov: () => {
       const f = sheetState;
       if (!confirm(`¿Eliminar definitivamente este movimiento de ${money(f.valor)} (${f.categoria})?\n\nNo quedará en el historial y no se puede deshacer.`)) return;
-      store.remove('movimientos', f.id);
+      borradosPorMi.add(f.id); store.remove('movimientos', f.id);
       avisar('🗑️ Movimiento eliminado', textoMov(f));
       toast('Movimiento eliminado'); closeSheet();
     },
